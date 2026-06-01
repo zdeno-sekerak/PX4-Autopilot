@@ -60,6 +60,15 @@ bool Ekf::fuseMag(const Vector3f &mag, const float R_MAG, VectorState &H, estima
 
 	const auto state_vector = _state.vector();
 
+	// limit heading change rate to prevent rapid wrong convergence when heading variance is high
+	// (e.g. after mag inhibition) and mag is disturbed (e.g. motor current at takeoff).
+	// shared budget across the 3 sequential components so the total heading change is bounded.
+	// dt is capped to the max expected mag interval so a long inhibition gap cannot inflate the budget.
+	const float dt_heading = update_all_states
+				 ? math::constrain((float)(_time_delayed_us - _time_last_heading_fuse) * 1e-6f, 1e-4f, 0.2f)
+				 : 0.f;
+	float dpsi_budget = math::radians(1.f) * dt_heading;
+
 	// update the states and covariance using sequential fusion of the magnetometer components
 	for (uint8_t index = 0; index <= 2; index++) {
 		// Calculate Kalman gains and observation jacobians
@@ -125,6 +134,19 @@ bool Ekf::fuseMag(const Vector3f &mag, const float R_MAG, VectorState &H, estima
 			Kfusion.setZero();
 			Kfusion.slice<State::mag_I.dof, 1>(State::mag_I.idx, 0) = K_mag_I;
 			Kfusion.slice<State::mag_B.dof, 1>(State::mag_B.idx, 0) = K_mag_B;
+		}
+
+		if (update_all_states) {
+			const float dpsi = Kfusion(State::quat_nominal.idx + 2) * aid_src.innovation[index];
+			const float dpsi_abs = fabsf(dpsi);
+
+			if (dpsi_abs > dpsi_budget) {
+				Kfusion *= dpsi_budget / math::max(dpsi_abs, FLT_EPSILON);
+				dpsi_budget = 0.f;
+
+			} else {
+				dpsi_budget -= dpsi_abs;
+			}
 		}
 
 		measurementUpdate(Kfusion, H, aid_src.observation_variance[index], aid_src.innovation[index]);
