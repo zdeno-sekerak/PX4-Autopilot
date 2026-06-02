@@ -158,8 +158,8 @@ mavlink_message_t *Mavlink::get_buffer()
 	return &_mavlink_buffer_early;
 }
 
-void Mavlink::lock_send() { pthread_mutex_lock(&mavlink_channel_send_mutexes[_instance_id]); }
-void Mavlink::unlock_send() { pthread_mutex_unlock(&mavlink_channel_send_mutexes[_instance_id]); }
+void Mavlink::lock_send() { if (_instance_id >= 0) { pthread_mutex_lock(&mavlink_channel_send_mutexes[_instance_id]); } }
+void Mavlink::unlock_send() { if (_instance_id >= 0) { pthread_mutex_unlock(&mavlink_channel_send_mutexes[_instance_id]); } }
 
 static bool accept_unsigned_callback(const mavlink_status_t *status, uint32_t message_id)
 {
